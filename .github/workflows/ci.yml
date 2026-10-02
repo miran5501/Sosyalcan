@@ -65,7 +65,7 @@ jobs:
         run: npm audit --omit=dev --audit-level=critical
       - run: npx prisma generate
       - run: npm run lint
-      - run: npx tsc --noEmit
+      - run: npm run typecheck
       - name: Hızlı testler
         run: npm test
       - name: Veritabanı testleri (ayrı sosyalcan_test veritabanı)
