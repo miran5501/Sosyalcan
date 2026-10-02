@@ -1,0 +1,180 @@
+@import "tailwindcss";
+
+/* Koyu mod <html class="dark"> ile açılır (Ayarlar menüsündeki Açık / Koyu / Sistem seçimi, layout.tsx). */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  /* Marka rengi (birincil düğmeler, seçili menü, vurgular) */
+  --color-brand-50: #eef2ff;
+  --color-brand-100: #e0e7ff;
+  --color-brand-200: #c7d2fe;
+  --color-brand-500: #6366f1;
+  --color-brand-600: #4f46e5;
+  --color-brand-700: #4338ca;
+  /* Renkli zemin üstündeki yazı: koyu modda da beyaz kalır (--color-white koyu modda yüzey rengine döner). */
+  --color-on-brand: #ffffff;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+:root {
+  --background: #f6f7fb;
+  --foreground: #171717;
+  color-scheme: light;
+}
+
+/*
+  Koyu mod: sayfalar Tailwind'in nötr ve renk ölçeklerini (bg-white, text-neutral-900, bg-red-50 ...)
+  kullanır; bu sınıflar CSS değişkenlerini okuduğu için ölçekleri burada tersine çevirmek bütün
+  arayüzü tek yerden koyu yapar. Beyaz kartlar koyu yüzeye, açık tonlu rozetler koyu tonlara,
+  koyu yazılar açık yazılara döner. color-scheme: dark form elemanlarını (tarih seçici, kaydırma
+  çubuğu) da koyu yapar; önceki "beyaz üzerine beyaz yazı" sorunu bu yüzden tekrar etmez.
+*/
+.dark {
+  color-scheme: dark;
+  --background: #0d0f14;
+  --foreground: #e8eaef;
+
+  --color-white: #161a22;
+  --color-neutral-50: #0d0f14;
+  --color-neutral-100: #1e232d;
+  --color-neutral-200: #2a303c;
+  --color-neutral-300: #3a414f;
+  --color-neutral-400: #6b7383;
+  --color-neutral-500: #98a0ae;
+  --color-neutral-600: #b3b9c5;
+  --color-neutral-700: #cdd2db;
+  --color-neutral-800: #e2e5eb;
+  --color-neutral-900: #f1f3f6;
+  --color-neutral-950: #fafbfc;
+
+  --color-brand-50: #1e1b4b;
+  --color-brand-100: #272463;
+  --color-brand-200: #3730a3;
+  --color-brand-500: #818cf8;
+  --color-brand-600: #6366f1;
+  --color-brand-700: #7c83f5;
+
+  --color-red-50: #2a1417;
+  --color-red-100: #3a1a1e;
+  --color-red-200: #5b2429;
+  --color-red-500: #f87171;
+  --color-red-600: #f87171;
+  --color-red-700: #fca5a5;
+  --color-red-800: #fecaca;
+
+  --color-amber-50: #2a2010;
+  --color-amber-100: #3a2c12;
+  --color-amber-200: #5c4417;
+  --color-amber-500: #fbbf24;
+  --color-amber-600: #fbbf24;
+  --color-amber-700: #fcd34d;
+
+  --color-green-50: #10251a;
+  --color-green-100: #143220;
+  --color-green-200: #1e4d31;
+  --color-green-500: #4ade80;
+  --color-green-600: #4ade80;
+  --color-green-700: #86efac;
+
+  --color-blue-50: #111f36;
+  --color-blue-100: #152747;
+  --color-blue-200: #1e3a66;
+  --color-blue-500: #60a5fa;
+  --color-blue-600: #60a5fa;
+  --color-blue-700: #93c5fd;
+
+  --color-purple-50: #221535;
+  --color-purple-100: #2c1a46;
+  --color-purple-200: #45286b;
+  --color-purple-500: #c084fc;
+  --color-purple-600: #c084fc;
+  --color-purple-700: #d8b4fe;
+}
+
+/* ---- Hareket: sayfa içeriği yumuşak girer, kartlar sırayla belirir, akordeon kayarak açılır ---- */
+:root {
+  /* details içeriğinin "auto" yüksekliğe geçişi (destekleyen tarayıcılarda). */
+  interpolate-size: allow-keywords;
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.animate-fade-up {
+  animation: fade-up 0.4s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+/* Sıralı belirme: kapsayıcının doğrudan çocukları 40 ms arayla. */
+.stagger > * {
+  animation: fade-up 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.stagger > *:nth-child(2) { animation-delay: 40ms; }
+.stagger > *:nth-child(3) { animation-delay: 80ms; }
+.stagger > *:nth-child(4) { animation-delay: 120ms; }
+.stagger > *:nth-child(5) { animation-delay: 160ms; }
+.stagger > *:nth-child(6) { animation-delay: 200ms; }
+.stagger > *:nth-child(n + 7) { animation-delay: 240ms; }
+
+details.collapsible::details-content {
+  block-size: 0;
+  overflow: hidden;
+  transition:
+    block-size 0.25s ease,
+    content-visibility 0.25s allow-discrete;
+}
+details.collapsible[open]::details-content {
+  block-size: auto;
+}
+
+/* Yatay çubuk grafiklerin dolma animasyonu */
+@keyframes grow-x {
+  from {
+    transform: scaleX(0);
+  }
+}
+@keyframes grow-y {
+  from {
+    transform: scaleY(0);
+  }
+}
+.animate-grow-x {
+  transform-origin: left;
+  animation: grow-x 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.animate-grow-y {
+  transform-origin: bottom;
+  animation: grow-y 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-up,
+  .stagger > *,
+  .animate-grow-x,
+  .animate-grow-y {
+    animation: none;
+  }
+  details.collapsible::details-content {
+    transition: none;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  /* layout.tsx'te yüklenen Geist yazı tipi; yüklenemezse sistem yazı tipine düşer. */
+  font-family: var(--font-geist-sans), system-ui, Arial, sans-serif;
+}

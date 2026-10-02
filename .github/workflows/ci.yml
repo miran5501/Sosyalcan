@@ -1,0 +1,136 @@
+# Sürekli entegrasyon: her push ve pull request'te çalışır.
+# Web: güvenlik açığı taraması + lint + tip kontrolü + hızlı testler + veritabanı testleri + üretim derlemesi,
+# ardından derlenmiş sunucu ayağa kaldırılıp sayfa (smoke), güvenlik ve tarayıcı (Playwright) testleri yapılır.
+# Mobil: tip kontrolü. Bu adımlardan biri kırmızıysa yayına alınmaz.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    name: Web (test + build + smoke + security)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: apps/web
+
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sosyalcan_ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/sosyalcan_ci?schema=public
+      REDIS_URL: redis://localhost:6379
+      AUTH_TRUST_HOST: "true"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      # Her çalıştırmada yeni, rastgele gizli anahtarlar (repo'da hiçbir gizli değer yok).
+      - name: Gizli anahtarları üret
+        run: |
+          echo "AUTH_SECRET=$(openssl rand -base64 36)" >> "$GITHUB_ENV"
+          echo "CRON_SECRET=$(openssl rand -hex 24)" >> "$GITHUB_ENV"
+
+      - run: npm ci
+      - name: Güvenlik açığı taraması (kritik açık varsa dur)
+        # Prisma 6 zincirindeki bilinen "high" bulgular kabul edildi (sürüm bilinçli sabit); "critical" kabul edilmez.
+        run: npm audit --omit=dev --audit-level=critical
+      - run: npx prisma generate
+      - run: npm run lint
+      - run: npx tsc --noEmit
+      - name: Hızlı testler
+        run: npm test
+      - name: Veritabanı testleri (ayrı sosyalcan_test veritabanı)
+        run: npm run test:db
+
+      - name: Migration + demo verisi
+        run: |
+          npx prisma migrate deploy
+          npm run seed
+      - name: Üretim derlemesi (önce ortam değişkenleri doğrulanır)
+        run: npm run build
+
+      - name: Sunucuyu başlat
+        run: |
+          npm start -- -p 3000 > server.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf http://localhost:3000/api/health && exit 0
+            sleep 2
+          done
+          cat server.log
+          exit 1
+      - name: Sayfa kontrolleri (4 rol)
+        run: npm run smoke
+      - name: Güvenlik kontrolleri
+        run: npm run security
+      - name: Tarayıcı testleri (Playwright, ayrı sosyalcan_e2e veritabanı)
+        run: |
+          npx playwright install --with-deps chromium
+          npm run test:e2e
+      - name: Playwright raporu
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            apps/web/playwright-report
+            apps/web/test-results
+          retention-days: 7
+      - name: Sunucu logu
+        if: failure()
+        run: cat server.log || true
+
+  mobile:
+    name: Mobil (tip kontrolü)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
+      - run: npm ci
+      - name: Güvenlik açığı taraması (kritik açık varsa dur)
+        run: npm audit --omit=dev --audit-level=critical
+      - run: npx tsc --noEmit
+
+  docker:
+    name: Docker imajı derleniyor mu
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Web imajı (yayınlanmaz, yalnızca derlenir)
+        run: docker build --target runner -t sosyalcan-web:ci apps/web

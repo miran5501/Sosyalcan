@@ -1,0 +1,31 @@
+# Bağımlılıklar
+node_modules/
+
+# Derleme çıktıları
+.next/
+out/
+build/
+dist/
+*.tsbuildinfo
+next-env.d.ts
+
+# Ortam değişkenleri
+.env
+.env.local
+.env.*.local
+
+# Yüklenen dosyalar (yerel depolama)
+apps/web/uploads/
+apps/web/.e2e-uploads/
+
+# Test çıktıları
+apps/web/playwright-report/
+apps/web/test-results/
+
+# Editör ve sistem
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+*.pem
+npm-debug.log*
+

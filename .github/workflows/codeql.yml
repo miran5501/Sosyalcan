@@ -1,0 +1,31 @@
+# CodeQL: GitHub'ın kod güvenlik taraması. Kodda SQL/komut enjeksiyonu, XSS, güvensiz yönlendirme,
+# gizli bilginin loglanması gibi kalıpları arar; bulguları depoda Security → Code scanning altında gösterir.
+# Herkese açık (public) depolarda ücretsizdir. Gizli (private) depoda GitHub Advanced Security gerekir;
+# o durumda bu iş "kod tarama etkin değil" hatasıyla biter — depo herkese açılınca ya da lisansla çalışır.
+name: CodeQL
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  schedule:
+    - cron: "0 4 * * 1" # her pazartesi 07:00 (İstanbul)
+
+jobs:
+  analyze:
+    name: Analiz (JavaScript/TypeScript)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      security-events: write
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          queries: security-and-quality
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:javascript-typescript"

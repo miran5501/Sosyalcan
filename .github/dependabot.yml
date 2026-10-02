@@ -1,0 +1,46 @@
+# Dependabot: kullanılan paketlerin yeni sürümleri ve güvenlik yamaları için her hafta otomatik pull request açar.
+# GitHub'a yüklendikten sonra kendiliğinden çalışır. Güvenlik UYARILARI (alerts) ayrıca depo ayarlarından açılır:
+# Settings → Code security → Dependabot alerts / Dependabot security updates.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /apps/web
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Istanbul
+    open-pull-requests-limit: 5
+    groups:
+      # Küçük güncellemeler tek PR'da toplansın (her paket için ayrı PR açılıp kalabalık olmasın).
+      minor-and-patch:
+        update-types: [minor, patch]
+    ignore:
+      # Prisma bilinçli olarak 6.x'te sabit (7'ye geçiş ayrı bir iş).
+      - dependency-name: prisma
+        update-types: [version-update:semver-major]
+      - dependency-name: "@prisma/client"
+        update-types: [version-update:semver-major]
+
+  - package-ecosystem: npm
+    directory: /apps/mobile
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Istanbul
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+    ignore:
+      # Expo SDK paketleri birlikte yükseltilmeli (npx expo install --fix); tek tek büyük sürüm atlanmasın.
+      - dependency-name: "expo*"
+        update-types: [version-update:semver-major]
+      - dependency-name: react-native
+        update-types: [version-update:semver-major]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

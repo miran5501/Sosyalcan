@@ -1,0 +1,560 @@
+// SosyalCan Komuta Merkezi - Prisma Şeması
+// Kurallar:
+// - Para tutarları integer (kuruş bazında), asla float değil.
+// - Silme işlemleri soft delete (archivedAt alanı ile).
+// - PaymentPlan başına ayda yalnızca bir PaymentInstance oluşabilir.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TwoFactorMethod {
+  APP
+  EMAIL
+}
+
+enum Role {
+  ADMIN
+  OPERATIONS
+  FINANCE
+  VIEWER
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+/// Admin'in yönettiği seçenek listelerinin türü (bkz. OptionItem).
+enum OptionKind {
+  SHOOT_TYPE // çekim türü (Video, Drone, ...)
+  DELIVERY_STATUS // çekimin teslim durumu (Planlandı, Çekildi, ...)
+  PLATFORM // paylaşım platformu (ör. bir sosyal medya)
+  POST_FORMAT // platforma bağlı paylaşım türü; parentId bir PLATFORM'dur
+  TASK_STATUS // görev durumu = Kanban sütunu (Bekliyor, Kurguda, ...)
+  EQUIPMENT_CATEGORY // ekipman kategorisi (Kamera, Ses, ...)
+  EQUIPMENT // ekipman; parentId bir EQUIPMENT_CATEGORY'dir
+  FINANCE_CATEGORY // gelir/gider kategorisi (finans kaydında seçilir)
+  PAYMENT_METHOD // ödeme yöntemi (nakit, havale, kart ...)
+  DELIVERY_CHECKLIST // çekim teslim kontrol listesinin şablon maddeleri (her yeni çekime kopyalanır)
+}
+
+enum TransactionType {
+  INCOME
+  EXPENSE
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  OVERDUE
+}
+
+model User {
+  id                 String           @id @default(cuid())
+  name               String
+  email              String           @unique
+  passwordHash       String
+  role               Role             @default(VIEWER)
+  disabledAt         DateTime?
+  /// Şifre değişince / hesap kapatılınca artırılır: eski web oturumları ve mobil token'lar geçersiz olur.
+  sessionVersion     Int              @default(0)
+  passwordChangedAt  DateTime?
+  /// Admin oluşturduğunda / sıfırladığında ve kurulumdaki ilk hesapta true: ilk girişte şifre değiştirmeden hiçbir şey yapılamaz.
+  mustChangePassword Boolean          @default(false)
+  /// İki adımlı doğrulama (TOTP). Gizli anahtar AES-256-GCM ile şifreli saklanır (anahtar AUTH_SECRET'tan türetilir).
+  totpSecret         String?
+  /// Kurulum sırasında, ilk kod doğrulanana kadar bekleyen anahtar.
+  totpPendingSecret  String?
+  /// 2FA'nın açıldığı an (yöntemden bağımsız); null = kapalı.
+  twoFactorEnabledAt DateTime?
+  /// Girişteki ikinci adımın yöntemi: doğrulama uygulaması ya da e-postaya gönderilen kod.
+  twoFactorMethod    TwoFactorMethod?
+  /// E-postaya gönderilen son kodun özeti (HMAC) ve son geçerlilik anı; kullanılınca silinir.
+  emailOtpHash       String?
+  emailOtpExpiresAt  DateTime?
+  /// Son kabul edilen 30 sn'lik adım: aynı kod ikinci kez kullanılamaz.
+  totpLastStep       Int?
+  /// Kurtarma kodlarının SHA-256 özetleri (kullanılan kod listeden çıkar).
+  recoveryCodes      String[]         @default([])
+  /// KVKK silme talebiyle anonimleştirildiyse.
+  anonymizedAt       DateTime?
+  lastLoginAt        DateTime?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  assignedTasks           Task[]                   @relation("TaskAssignee")
+  assignedShoots          Shoot[]                  @relation("ShootAssignee")
+  appointments            Appointment[]            @relation("AppointmentParticipants")
+  taskComments            TaskComment[]
+  taskLinks               TaskLink[]
+  refreshTokens           RefreshToken[]
+  checklistDone           ShootChecklistItem[]     @relation("ChecklistDoneBy")
+  notifications           Notification[]
+  notificationPreferences NotificationPreference[]
+  passwordResetTokens     PasswordResetToken[]
+  knownDevices            KnownDevice[]
+  attachments             Attachment[]
+  auditLogs               AuditLog[]
+
+  @@map("users")
+}
+
+model Customer {
+  id           String    @id @default(cuid())
+  name         String
+  contact      String?
+  notes        String?
+  tags         String[]  @default([]) // etiket / segment (küçük harfe çevrilmiş, tekrarsız)
+  archivedAt   DateTime?
+  /// KVKK silme talebiyle kişisel bilgileri silindiyse (finans kayıtları yasal saklama için kalır).
+  anonymizedAt DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  tasks        Task[]
+  shoots       Shoot[]
+  appointments Appointment[]
+  transactions Transaction[]
+  paymentPlans PaymentPlan[]
+
+  @@map("customers")
+}
+
+model Task {
+  id          String       @id @default(cuid())
+  title       String
+  description String?
+  priority    TaskPriority @default(MEDIUM)
+  dueDate     DateTime?
+  archivedAt  DateTime?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  customer   Customer? @relation(fields: [customerId], references: [id])
+  customerId String?
+  assignee   User?     @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  assigneeId String?
+
+  status         OptionItem   @relation("TaskStatusOption", fields: [statusId], references: [id])
+  statusId       String
+  /// Nerede paylaşılacak (çekimdekiyle aynı liste).
+  publishTargets OptionItem[] @relation("TaskPublishTargets")
+
+  comments TaskComment[]
+  links    TaskLink[]
+
+  @@map("tasks")
+}
+
+/// Görev detayındaki yorum/not.
+/// Yorumlar düzenlenmez/silinmez: kayıt geçmişi olarak kalır.
+model TaskComment {
+  id        String   @id @default(cuid())
+  body      String
+  createdAt DateTime @default(now())
+
+  task     Task   @relation(fields: [taskId], references: [id])
+  taskId   String
+  author   User   @relation(fields: [authorId], references: [id])
+  authorId String
+
+  @@index([taskId, createdAt])
+  @@map("task_comments")
+}
+
+/// Göreve eklenen bağlantı (Drive, referans vb.). Dosya yüklenmez, yalnızca http(s) adresi tutulur.
+/// Kaldırılan bağlantı fiziksel silinmez, arşivlenir (archivedAt).
+model TaskLink {
+  id         String    @id @default(cuid())
+  url        String
+  label      String?
+  archivedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  task     Task   @relation(fields: [taskId], references: [id])
+  taskId   String
+  author   User   @relation(fields: [authorId], references: [id])
+  authorId String
+
+  @@index([taskId, createdAt])
+  @@map("task_links")
+}
+
+/// Genel ajans bilgileri (tek satırlık ayar tablosu: id her zaman "singleton").
+model AgencySettings {
+  id                        String   @id @default("singleton")
+  name                      String
+  logoUrl                   String?
+  /// KVKK aydınlatma metni (giriş sayfasından herkese açık). Boşsa taslak şablon gösterilir.
+  privacyNotice             String?
+  /// Saklama süreleri (gün). Süresi dolan kayıtlar günlük işte silinir.
+  auditRetentionDays        Int      @default(730)
+  notificationRetentionDays Int      @default(180)
+  emailRetentionDays        Int      @default(90)
+  errorRetentionDays        Int      @default(90)
+  updatedAt                 DateTime @updatedAt
+
+  @@map("agency_settings")
+}
+
+/// Admin'in Ayarlar'dan eklediği seçenekler: çekim türleri, teslim durumları, platformlar ve
+/// platformların paylaşım türleri. Kaldırılan seçenek silinmez, arşivlenir (eski kayıtlarda görünmeye devam eder).
+model OptionItem {
+  id         String     @id @default(cuid())
+  kind       OptionKind
+  label      String
+  color      String? // rozet rengi anahtarı (neutral, blue, amber, green, red, purple); yalnızca durumlar için
+  isDone     Boolean    @default(false) // yalnızca görev durumları: bu sütundaki görev "tamamlandı" sayılır
+  sortOrder  Int        @default(0)
+  archivedAt DateTime?
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  parent   OptionItem?  @relation("OptionChildren", fields: [parentId], references: [id])
+  parentId String?
+  children OptionItem[] @relation("OptionChildren")
+
+  shootsOfType   Shoot[]       @relation("ShootTypeOption")
+  shootsInStatus Shoot[]       @relation("ShootStatusOption")
+  shootsTargeted Shoot[]       @relation("ShootPublishTargets")
+  tasksInStatus  Task[]        @relation("TaskStatusOption")
+  tasksTargeted  Task[]        @relation("TaskPublishTargets")
+  shootsEquipped Shoot[]       @relation("ShootEquipment")
+  transactions   Transaction[] @relation("TransactionPaymentMethod")
+
+  @@index([kind, sortOrder])
+  @@map("option_items")
+}
+
+model Shoot {
+  id            String    @id @default(cuid())
+  scheduledAt   DateTime
+  location      String?
+  brief         String?
+  equipment     String? // ekipman notu (listede olmayanlar / ek açıklama); ekipmanlar equipmentItems'ta
+  deliveryLink  String?
+  /// Müşterinin istediği revizyon sayısı (kurgu tekrar düzenlendikçe artırılır).
+  revisionCount Int       @default(0)
+  archivedAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  type             OptionItem           @relation("ShootTypeOption", fields: [typeId], references: [id])
+  typeId           String
+  deliveryStatus   OptionItem           @relation("ShootStatusOption", fields: [deliveryStatusId], references: [id])
+  deliveryStatusId String
+  /// Nerede paylaşılacak: platform veya platformun paylaşım türü (ör. "Instagram · Reels").
+  publishTargets   OptionItem[]         @relation("ShootPublishTargets")
+  /// Çekimde kullanılacak ekipmanlar (admin'in ekipman listesinden).
+  equipmentItems   OptionItem[]         @relation("ShootEquipment")
+  /// Teslim kontrol listesi (oluştururken admin'in şablonundan kopyalanır, sonra çekime özel düzenlenir).
+  checklist        ShootChecklistItem[]
+  attachments      Attachment[]
+
+  customer   Customer? @relation(fields: [customerId], references: [id])
+  customerId String?
+  assignee   User?     @relation("ShootAssignee", fields: [assigneeId], references: [id])
+  assigneeId String?
+
+  @@map("shoots")
+}
+
+model Appointment {
+  id         String    @id @default(cuid())
+  title      String
+  startsAt   DateTime
+  archivedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  customer     Customer? @relation(fields: [customerId], references: [id])
+  customerId   String?
+  participants User[]    @relation("AppointmentParticipants")
+
+  @@map("appointments")
+}
+
+model Transaction {
+  id           String          @id @default(cuid())
+  type         TransactionType
+  amount       Int // kuruş bazında, asla float değil
+  category     String?
+  description  String?
+  counterparty String? // kime ödendi / kimden alındı (tedarikçi, kişi, kurum); müşteri ayrıca customerId'de
+  occurredAt   DateTime        @default(now())
+  createdAt    DateTime        @default(now())
+
+  customer   Customer? @relation(fields: [customerId], references: [id])
+  customerId String?
+
+  paymentMethod   OptionItem? @relation("TransactionPaymentMethod", fields: [paymentMethodId], references: [id])
+  paymentMethodId String?
+
+  /// KDV oranı (%; boş = belirtilmedi). Tutar KDV dahildir; KDV tutarı kaydederken hesaplanıp saklanır (kuruş).
+  vatRate   Int?
+  vatAmount Int?
+  invoiceNo String?
+
+  paymentInstance   PaymentInstance? @relation(fields: [paymentInstanceId], references: [id])
+  paymentInstanceId String?          @unique
+
+  attachments Attachment[]
+
+  @@index([occurredAt])
+  @@map("transactions")
+}
+
+model PaymentPlan {
+  id            String    @id @default(cuid())
+  title         String
+  monthlyAmount Int // kuruş bazında
+  billingDay    Int // ayın kaçında tahsil edilecek (1-28)
+  /// KDV oranı (%); "ödeme alındı" ile oluşan gelir kaydına aktarılır.
+  vatRate       Int?
+  archivedAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  customer   Customer @relation(fields: [customerId], references: [id])
+  customerId String
+
+  instances PaymentInstance[]
+
+  @@map("payment_plans")
+}
+
+model PaymentInstance {
+  id        String        @id @default(cuid())
+  month     Int // 1-12
+  year      Int
+  amount    Int // kuruş bazında, plan oluşturulduğu andaki tutar kopyalanır
+  status    PaymentStatus @default(PENDING)
+  paidAt    DateTime?
+  createdAt DateTime      @default(now())
+
+  paymentPlan   PaymentPlan @relation(fields: [paymentPlanId], references: [id])
+  paymentPlanId String
+
+  transaction Transaction?
+
+  // Bir ödeme planı için aynı ay/yıl içinde yalnızca bir örnek oluşabilir.
+  @@unique([paymentPlanId, year, month])
+  @@map("payment_instances")
+}
+
+model Partner {
+  id           String   @id @default(cuid())
+  name         String
+  sharePercent Int // tam yüzde (örn. 35); tüm ortakların toplamı 100 olmalı
+  position     Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@map("partners")
+}
+
+/// Mobil uygulamanın yenileme (refresh) token'ı. Token'ın kendisi değil SHA-256 özeti saklanır.
+/// Her yenilemede eski token iptal edilip aynı ailede yenisi verilir (rotation); iptal edilmiş
+/// bir token tekrar kullanılırsa çalınmış sayılır ve bütün aile iptal edilir.
+model RefreshToken {
+  id         String    @id @default(cuid())
+  tokenHash  String    @unique
+  familyId   String
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime?
+  userAgent  String?
+  ip         String?
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+
+  @@index([userId])
+  @@index([familyId])
+  @@map("refresh_tokens")
+}
+
+/// Denetim kaydı: kim, ne zaman, neyi yaptı. Yalnızca eklenir, değiştirilmez/silinmez.
+model AuditLog {
+  id        String   @id @default(cuid())
+  action    String
+  entity    String?
+  entityId  String?
+  summary   String?
+  /// Değişen alanların eski/yeni değerleri: { alan: { from, to } }. Şifre özeti gibi gizli alanlar maskelenir.
+  changes   Json?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userId String?
+
+  @@index([createdAt])
+  @@index([userId, createdAt])
+  @@index([action, createdAt])
+  @@map("audit_logs")
+}
+
+/// Bir çekimin teslim kontrol listesi maddesi.
+model ShootChecklistItem {
+  id        String    @id @default(cuid())
+  label     String
+  done      Boolean   @default(false)
+  doneAt    DateTime?
+  sortOrder Int       @default(0)
+  createdAt DateTime  @default(now())
+
+  shoot    Shoot   @relation(fields: [shootId], references: [id], onDelete: Cascade)
+  shootId  String
+  doneBy   User?   @relation("ChecklistDoneBy", fields: [doneById], references: [id], onDelete: SetNull)
+  doneById String?
+
+  @@index([shootId, sortOrder])
+  @@map("shoot_checklist_items")
+}
+
+/// Uygulama içi bildirim (web ve mobilde zil simgesi). `dedupeKey` aynı hatırlatmanın ikinci kez oluşmasını engeller.
+model Notification {
+  id          String    @id @default(cuid())
+  type        String
+  title       String
+  body        String?
+  /// Tıklanınca gidilecek sayfa (ör. /tasks/abc/edit).
+  link        String?
+  dedupeKey   String?
+  readAt      DateTime?
+  /// Kişi bildirimi listeden kaldırdıysa (çarpı). Satır silinmez: aynı hatırlatma (dedupeKey) tekrar oluşmasın.
+  dismissedAt DateTime?
+  /// E-postası gönderildiyse (anlık ya da günlük özetle) zamanı.
+  emailedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+
+  @@unique([userId, dedupeKey])
+  @@index([userId, readAt, createdAt])
+  @@map("notifications")
+}
+
+/// Kullanıcının bildirim türü başına tercihi. Satır yoksa varsayılan: uygulama içi ve e-posta açık.
+model NotificationPreference {
+  id    String  @id @default(cuid())
+  type  String
+  inApp Boolean @default(true)
+  email Boolean @default(true)
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+
+  @@unique([userId, type])
+  @@map("notification_preferences")
+}
+
+/// Giden e-postalar. SMTP tanımlı değilse (geliştirme modu) e-posta gönderilmez, durumu LOGGED olur ve içerik burada görülür.
+model EmailMessage {
+  id        String    @id @default(cuid())
+  to        String
+  subject   String
+  text      String
+  /// LOGGED (geliştirme modu), SENT, FAILED
+  status    String
+  error     String?
+  createdAt DateTime  @default(now())
+  sentAt    DateTime?
+
+  @@index([createdAt])
+  @@map("email_outbox")
+}
+
+/// Zamanlanmış işlerin son çalışma zamanı (ör. günlük hatırlatmalar günde bir kez çalışsın).
+model JobRun {
+  name       String   @id
+  lastRunAt  DateTime
+  lastResult String?
+
+  @@map("job_runs")
+}
+
+/// "Şifremi unuttum" bağlantısı. Token'ın kendisi değil SHA-256 özeti saklanır; 30 dk geçerli, tek kullanımlık.
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  ip        String?
+  createdAt DateTime  @default(now())
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+
+  @@index([userId])
+  @@map("password_reset_tokens")
+}
+
+/// Uygulamada yakalanan hatalar (sunucu, tarayıcı, mobil). Aynı hata tekrar edince yeni satır yerine sayaç artar.
+model ErrorEvent {
+  id          String    @id @default(cuid())
+  source      String
+  message     String
+  path        String?
+  digest      String?
+  stack       String?
+  /// Aynı hatayı gruplamak için (kaynak + mesaj + yol özeti).
+  fingerprint String    @unique
+  count       Int       @default(1)
+  firstSeenAt DateTime  @default(now())
+  lastSeenAt  DateTime  @default(now())
+  resolvedAt  DateTime?
+
+  @@index([lastSeenAt])
+  @@map("error_events")
+}
+
+/// Kişinin giriş yaptığı cihazlar ("yeni cihazdan giriş" uyarısı için). Cihaz kimliği web'de uzun ömürlü
+/// bir çerez, mobilde uygulamanın sakladığı rastgele bir kimliktir; veritabanında yalnızca özeti durur.
+model KnownDevice {
+  id          String   @id @default(cuid())
+  deviceHash  String
+  label       String
+  channel     String
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+  lastIp      String?
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+
+  @@unique([userId, deviceHash])
+  @@map("known_devices")
+}
+
+/// Kayda eklenmiş dosya: çekimde teslim dosyası, finans kaydında fatura vb. Dosyanın kendisi depolamada
+/// (yerel disk ya da S3 uyumlu servis), burada yalnızca bilgisi ve depolama anahtarı durur.
+model Attachment {
+  id          String   @id @default(cuid())
+  fileName    String
+  contentType String
+  size        Int
+  storageKey  String   @unique
+  createdAt   DateTime @default(now())
+
+  shoot         Shoot?       @relation(fields: [shootId], references: [id], onDelete: Cascade)
+  shootId       String?
+  transaction   Transaction? @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  transactionId String?
+  uploadedBy    User?        @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+  uploadedById  String?
+
+  @@index([shootId])
+  @@index([transactionId])
+  @@map("attachments")
+}
