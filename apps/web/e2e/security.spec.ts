@@ -7,6 +7,8 @@ test.describe("hesap güvenliği", () => {
     const user = await makeUser("OPERATIONS");
     await page.goto("/login");
     await page.getByRole("link", { name: "Şifremi unuttum" }).click();
+    // Sayfa geçişi bitmeden yazılırsa e-posta giriş sayfasındaki kutuya gider.
+    await expect(page.getByRole("heading", { name: "Şifremi unuttum" })).toBeVisible();
     await page.getByLabel("E-posta").fill(user.email);
     await page.getByRole("button", { name: "Sıfırlama bağlantısı gönder" }).click();
     await expect(page.getByText(/kayıtlıysa şifre sıfırlama bağlantısı gönderildi/)).toBeVisible();

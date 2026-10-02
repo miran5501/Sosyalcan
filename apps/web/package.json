@@ -17,7 +17,8 @@
     "security": "node scripts/security-check.mjs",
     "seed": "tsx prisma/seed.ts",
     "db:backup": "node scripts/backup-db.mjs",
-    "db:restore-test": "node scripts/restore-db.mjs"
+    "db:restore-test": "node scripts/restore-db.mjs",
+    "storage:check": "tsx scripts/check-storage.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",

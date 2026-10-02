@@ -34,6 +34,8 @@ const env = {
   AUTH_TRUST_HOST: "true",
   APP_URL: `http://localhost:${port}`,
   E2E_PORT: port,
+  // Testler tarihleri uygulamanın saat dilimine göre kurar; sunucu UTC olsa da (CI) aynı sonuç çıksın.
+  TZ: "Europe/Istanbul",
   // E-postayla 2FA testi: SMTP yok, kodlar giden kutusundan okunur.
   EMAIL_2FA_WITHOUT_SMTP: "true",
   // Dosya ekleri geliştirme klasörüne değil ayrı bir klasöre yazılsın.
