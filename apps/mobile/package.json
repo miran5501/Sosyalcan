@@ -5,17 +5,17 @@
   "dependencies": {
     "@react-navigation/bottom-tabs": "^7.19.2",
     "@react-navigation/native": "^7.4.1",
-    "expo": "~57.0.24",
+    "expo": "~57.0.25",
     "expo-device": "~57.0.2",
     "expo-secure-store": "~57.0.4",
     "expo-status-bar": "~57.0.1",
-    "react": "19.2.3",
-    "react-native": "0.86.3",
-    "react-native-safe-area-context": "~5.7.0",
-    "react-native-screens": "~4.26.0"
+    "react": "19.3.0",
+    "react-native": "0.87.1",
+    "react-native-safe-area-context": "~5.10.0",
+    "react-native-screens": "~4.28.0"
   },
   "devDependencies": {
-    "@types/react": "~19.2.2",
+    "@types/react": "~19.3.0",
     "typescript": "~6.0.3"
   },
   "scripts": {
